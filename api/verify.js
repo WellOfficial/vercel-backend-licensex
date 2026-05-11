@@ -100,21 +100,10 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('License Verification Error:', error);
     
-    let errMsg = 'Database Error: ' + error.message;
-    
-    // ดักจับ Error เรื่อง Index และพยายามดึงลิงก์ออกมา
-    if (error.message.includes('FAILED_PRECONDITION')) {
-        const urlMatch = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
-        if (urlMatch) {
-            errMsg = `กรุณาสร้าง Index ก่อนครับ โดยก๊อปปี้ลิงก์นี้ไปเปิดในเบราว์เซอร์: ${urlMatch[0]}`;
-        } else {
-            errMsg = `ต้องตั้งค่า Index ใน Firebase ก่อนครับ (ดูวิธีทำในแชท)`;
-        }
-    }
-
+    // ส่ง Error แบบดิบๆ (Raw Error) กลับไปที่หน้าจอเพื่อให้เห็นลิงก์โดยตรง
     return res.status(500).json({ 
       valid: false, 
-      message: errMsg 
+      message: 'Database Error: ' + error.message 
     });
   }
 }
