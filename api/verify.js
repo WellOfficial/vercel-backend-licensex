@@ -10,21 +10,6 @@
 const admin = require('firebase-admin');
 const cors = require('cors')({ origin: true });
 
-// ตรวจสอบและตั้งค่า Firebase Admin
-if (!admin.apps.length) {
-  try {
-    // ดึงค่า Service Account จากตัวแปร Environment ของ Vercel
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-  } catch (error) {
-    console.error("Error initializing Firebase Admin. Please check FIREBASE_SERVICE_ACCOUNT environment variable.");
-  }
-}
-
-const db = admin.firestore();
-
 export default async function handler(req, res) {
   // เปิดใช้งาน CORS เพื่อให้ดึงข้อมูลข้ามโดเมนได้
   await new Promise((resolve, reject) => {
@@ -39,14 +24,35 @@ export default async function handler(req, res) {
     return res.status(405).json({ valid: false, message: 'Method Not Allowed' });
   }
 
+  // ---------------------------------------------------------
+  // 1. ตรวจสอบการตั้งค่า Firebase Admin (เช็คว่าเชื่อมต่อได้ไหม)
+  // ---------------------------------------------------------
+  if (!admin.apps.length) {
+    try {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+    } catch (error) {
+      console.error("Firebase Init Error:", error);
+      return res.status(500).json({ 
+        valid: false, 
+        message: 'การเชื่อมต่อ Firebase ผิดพลาด: โปรดตรวจสอบ FIREBASE_SERVICE_ACCOUNT ใน Vercel (' + error.message + ')' 
+      });
+    }
+  }
+
+  const db = admin.firestore();
   const { key, hwid } = req.body;
 
   if (!key) {
     return res.status(400).json({ valid: false, message: 'License key is required.' });
   }
 
+  // ---------------------------------------------------------
+  // 2. ค้นหาข้อมูล License Key (พร้อมส่ง Error กลับไปแสดงผล)
+  // ---------------------------------------------------------
   try {
-    // ค้นหา License Key จาก Firestore
     const querySnapshot = await db.collectionGroup('licenses').where('key', '==', key).get();
 
     if (querySnapshot.empty) {
@@ -56,7 +62,7 @@ export default async function handler(req, res) {
     const licenseDoc = querySnapshot.docs[0];
     const licenseData = licenseDoc.data();
 
-    // 1. ตรวจสอบสถานะ (Active, Suspended, Revoked)
+    // ตรวจสอบสถานะ (Active, Suspended, Revoked)
     if (licenseData.status !== 'active') {
       return res.status(403).json({ 
         valid: false, 
@@ -64,22 +70,20 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. ตรวจสอบวันหมดอายุ
+    // ตรวจสอบวันหมดอายุ
     if (Date.now() > licenseData.expiresAt) {
       await licenseDoc.ref.update({ status: 'expired' });
       return res.status(403).json({ valid: false, message: 'License has expired.' });
     }
 
-    // 3. ตรวจสอบและผูก Hardware ID (HWID)
+    // ตรวจสอบและผูก Hardware ID (HWID)
     if (hwid) {
       if (!licenseData.hardwareId) {
-        // หากยังไม่มีการผูก HWID ให้บันทึกในครั้งแรก
         await licenseDoc.ref.update({ 
           hardwareId: hwid,
           currentActivations: admin.firestore.FieldValue.increment(1)
         });
       } else if (licenseData.hardwareId !== hwid) {
-        // หาก HWID ไม่ตรงกับที่บันทึกไว้
         return res.status(403).json({ 
           valid: false, 
           message: 'Hardware ID mismatch. License already bound to another machine.' 
@@ -87,7 +91,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // ผ่านการตรวจสอบทั้งหมด
     return res.status(200).json({ 
       valid: true, 
       message: 'Authentication successful',
@@ -96,6 +99,10 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('License Verification Error:', error);
-    return res.status(500).json({ valid: false, message: 'Internal Server Error' });
+    // แจ้งเตือน Error ฉบับเต็มให้เห็นบนหน้าจอเว็บ
+    return res.status(500).json({ 
+      valid: false, 
+      message: 'Database Error: ' + error.message 
+    });
   }
 }
