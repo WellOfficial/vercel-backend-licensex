@@ -100,10 +100,16 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('License Verification Error:', error);
     
-    // ส่ง Error แบบดิบๆ (Raw Error) กลับไปที่หน้าจอเพื่อให้เห็นลิงก์โดยตรง
+    let errMsg = 'Database Error: ' + error.message;
+    
+    // ดักจับ Error FAILED_PRECONDITION และแสดงวิธีแก้ไขสำหรับ UI ใหม่
+    if (error.message.includes('FAILED_PRECONDITION')) {
+        errMsg = `ต้องสร้าง Index ก่อนครับ:\n1. ไปที่ Firebase > Firestore > Indexes\n2. สังเกตมุมขวาบน กดคำว่า "Automatic"\n3. กดปุ่ม Add exemption\n4. ใส่ Collection ID: licenses และ Field path: key\n5. เปิดใช้งาน Collection group แล้วกด Save ครับ`;
+    }
+
     return res.status(500).json({ 
       valid: false, 
-      message: 'Database Error: ' + error.message 
+      message: errMsg 
     });
   }
 }
